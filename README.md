@@ -335,4 +335,92 @@ Current Query
 │ 0 or 1,3,...     │
 └────────┬─────────┘
          │
-      ┌──┴────────────
+      ┌──┴───────────────┐
+      │                  │
+      0              selected turns
+      │                  │
+      ▼                  ▼
+ no history        downstream LLM
+```
+
+별도의 binary gate를 먼저 두는
+
+```text
+Binary Gate
+   ↓
+Selector
+```
+
+2-stage 구조는 현재 결과만 보면 굳이 필요하지 않아 보인다.
+
+`history_select` 자체가 이미:
+
+```text
+0 = history 불필요
+1,3 = history 필요 + selection
+```
+
+이라는 두 역할을 동시에 수행하고 있으며 binary accuracy도 더 높기 때문이다.
+
+---
+
+## 12. 다만 production에서는 recall 보완이 필요
+
+현재 selector의 가장 큰 약점은:
+
+```text
+Turn Recall = 52.6%
+```
+
+이다.
+
+그래서 production에 바로 적용한다면 strict top-k selection보다 다음처럼 조금 완화하는 방식이 더 안전하다.
+
+```text
+History Selector
+      │
+      ├─ selected: 3
+      │
+      └─ neighbor expansion
+           ↓
+        [2,3,4]
+```
+
+또는:
+
+```text
+selector output = 3
+
+실제 context =
+H3 + 바로 이전 H2
+```
+
+처럼 선택된 turn 주변의 1개 turn을 함께 가져오는 방식이다.
+
+그러면 현재의 **1.03 turns라는 높은 압축률을 어느 정도 유지하면서 recall을 크게 높일 가능성**이 있다.
+
+---
+
+# 결론
+
+이번 100개 실험에서는 `history_select`가 가장 강한 결과를 보였다.
+
+```text
+Binary Accuracy
+73% → 91%
+
+Average history turns
+5.11 → 1.03
+
+Turn Precision
+35.9% → 59.2%
+
+Latency
+1.222s → 1.327s
+```
+
+따라서 **GPT-6 Luna로 단순 `0/1 history gate`만 두는 것보다, `0` 또는 `1,3` 형태로 필요한 history를 직접 선택하게 하는 접근이 더 유망하다.**
+
+다만 `history_select`의 turn recall이 **52.6%**에 불과하므로, 현재 결과는 **“selector가 충분히 안전하다”라기보다는 “context compression과 routing accuracy는 좋지만 과도하게 history를 제거한다”**로 해석하는 것이 맞다.
+
+다음 실험에서는 `history_select + ±1 neighboring turn` 또는 `top-k=2/3` 방식으로 recall을 보완한 뒤 downstream QA EM/F1까지 비교하는 것이 가장 중요하다.
